@@ -1,30 +1,25 @@
-package ashlib.data.plugins.ui.models;
+package ashlib.data.scripts;
 
 import ashlib.data.plugins.misc.AshMisc;
 import ashlib.data.plugins.reflection.ReflectionBetterUtilis;
-import ashlib.data.plugins.ui.plugins.UILinesRenderer;
+import com.fs.starfarer.api.EveryFrameScript;
 import com.fs.starfarer.api.Global;
-import com.fs.starfarer.api.campaign.CampaignUIAPI;
-import com.fs.starfarer.api.campaign.CoreUIAPI;
-import com.fs.starfarer.api.campaign.CustomUIPanelPlugin;
-import com.fs.starfarer.api.campaign.InteractionDialogAPI;
-import com.fs.starfarer.api.graphics.SpriteAPI;
-import com.fs.starfarer.api.input.InputEventAPI;
+import com.fs.starfarer.api.campaign.*;
+import com.fs.starfarer.api.characters.PersonAPI;
 import com.fs.starfarer.api.ui.*;
 import com.fs.starfarer.api.util.Misc;
 import com.fs.starfarer.api.util.Pair;
+import com.fs.starfarer.coreui.CaptainPickerDialog;
+import com.fs.starfarer.coreui.P;
 import org.lwjgl.input.Keyboard;
 
-import java.awt.*;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.util.ArrayList;
 import java.util.List;
 
-public class PopUpUI implements CustomUIPanelPlugin {
-
-    public int limit = 5;
-    public float totalFrames;
+public class AiCoreLevelUpHijacker implements EveryFrameScript {
     private static class ReflectionUtilis {
         // Code taken and modified from Grand Colonies
         private static final Class<?> fieldClass;
@@ -37,6 +32,7 @@ public class PopUpUI implements CustomUIPanelPlugin {
         private static final MethodHandle getMethodNameHandle;
         private static final MethodHandle invokeMethodHandle;
         private static final MethodHandle setMethodAccessable;
+        private static final MethodHandle getTypeHandle;
 
         static {
             try {
@@ -45,16 +41,37 @@ public class PopUpUI implements CustomUIPanelPlugin {
                 getFieldHandle = lookup.findVirtual(fieldClass, "get", MethodType.methodType(Object.class, Object.class));
                 getFieldNameHandle = lookup.findVirtual(fieldClass, "getName", MethodType.methodType(String.class));
                 setFieldAccessibleHandle = lookup.findVirtual(fieldClass, "setAccessible", MethodType.methodType(Void.TYPE, boolean.class));
+                getTypeHandle = lookup.findVirtual(fieldClass, "getType", MethodType.methodType(Class.class));
 
                 methodClass = Class.forName("java.lang.reflect.Method", false, Class.class.getClassLoader());
                 getMethodNameHandle = lookup.findVirtual(methodClass, "getName", MethodType.methodType(String.class));
                 invokeMethodHandle = lookup.findVirtual(methodClass, "invoke", MethodType.methodType(Object.class, Object.class, Object[].class));
                 setMethodAccessable = lookup.findVirtual(methodClass, "setAccessible", MethodType.methodType(Void.TYPE, boolean.class));
+
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         }
+        public static List<Object> getAssignableFieldValues(Object instance, Class<?> assignableTo) {
+            List<Object> matchingValues = new ArrayList<>();
+            Class<?> currentClass = instance.getClass();
 
+            while (currentClass != null) {
+                for (Object field : currentClass.getDeclaredFields()) {
+                    try {
+                        setFieldAccessibleHandle.invoke(field, true);
+                        if (assignableTo.isAssignableFrom((Class<?>) getTypeHandle.invoke(field))) {
+                            matchingValues.add(getFieldHandle.invoke(field, instance));
+                        }
+                    } catch (Throwable e) {
+                        throw new RuntimeException("Error processing field: " , e);
+                    }
+                }
+                currentClass = currentClass.getSuperclass();
+            }
+
+            return matchingValues;
+        }
         public static Object getPrivateVariable(String fieldName, Object instanceToGetFrom) {
             try {
                 Class<?> instances = instanceToGetFrom.getClass();
@@ -303,241 +320,117 @@ public class PopUpUI implements CustomUIPanelPlugin {
             return core == null ? null : (UIPanelAPI) core;
         }
     }
-    SpriteAPI blackBackground = Global.getSettings().getSprite("rendering","GlitchSquare");
-    SpriteAPI borders = Global.getSettings().getSprite("rendering","GlitchSquare");
-    SpriteAPI panelBackground  = Global.getSettings().getSprite("ui","panel00_center");
-    SpriteAPI bot= Global.getSettings().getSprite("ui","panel00_bot");
-    SpriteAPI top= Global.getSettings().getSprite("ui","panel00_top");
-    SpriteAPI left= Global.getSettings().getSprite("ui","panel00_left");
-    SpriteAPI right= Global.getSettings().getSprite("ui","panel00_right");
-    SpriteAPI topLeft= Global.getSettings().getSprite("ui","panel00_top_left");
-    SpriteAPI topRight= Global.getSettings().getSprite("ui","panel00_top_right");
-    SpriteAPI bottomLeft= Global.getSettings().getSprite("ui","panel00_bot_left");
-    SpriteAPI bottomRight= Global.getSettings().getSprite("ui","panel00_bot_right");
-    public static float buttonConfirmWidth = 160;
-    public float frames;
-    public CustomPanelAPI panelToInfluence;
-    public UILinesRenderer rendererBorder = new UILinesRenderer(0f);
-   public ButtonAPI confirmButton;
-    public ButtonAPI cancelButton;
-    public boolean isDialog =true;
-    public ButtonAPI getConfirmButton() {
-        return confirmButton;
-    }
-
-    public CustomPanelAPI getPanelToInfluence() {
-        return panelToInfluence;
-    }
-
-    public ButtonAPI getCancelButton() {
-        return cancelButton;
-    }
-    public boolean reachedMaxHeight =  false;
-    float originalSizeX ,originalSizeY;
-    float x,y;
+    transient Object officerRowData;
+    transient ButtonAPI button;
+    transient Object currDialog;
     @Override
-    public void positionChanged(PositionAPI position) {
-
-    }
-
-    public void init(CustomPanelAPI panelAPI,float x, float y,boolean isDialog) {
-        panelToInfluence = panelAPI;
-        UIPanelAPI mainPanel =  ProductionUtil.getCoreUI();
-        originalSizeX = panelAPI.getPosition().getWidth();
-        originalSizeY = panelAPI.getPosition().getHeight();
-
-        panelToInfluence.getPosition().setSize(16,16);
-        this.isDialog = isDialog;
-
-        mainPanel.addComponent(panelToInfluence).inTL(x, mainPanel.getPosition().getHeight()-y);
-        mainPanel.bringComponentToTop(panelToInfluence);
-        rendererBorder.setPanel(panelToInfluence);
-
-    }
-    public void createUI(CustomPanelAPI panelAPI){
-        //Note here is where you create UI : Methods you need to change is advance , createUI, and inputEvents handler
-        //Also remember super.apply()
-
-
-    }
-    public float createUIMockup(CustomPanelAPI panelAPI){
-        return 0f;
-    }
-    @Override
-    public void renderBelow(float alphaMult) {
-        if(panelToInfluence != null){
-            TiledTextureRenderer renderer = new TiledTextureRenderer(panelBackground.getTextureId());
-            if(isDialog){
-                blackBackground.setSize(ProductionUtil.getCoreUI().getPosition().getWidth(), ProductionUtil.getCoreUI().getPosition().getHeight());
-                blackBackground.setColor(Color.black);
-                blackBackground.setAlphaMult(0.6f);
-                blackBackground.renderAtCenter(ProductionUtil.getCoreUI().getPosition().getCenterX(),ProductionUtil.getCoreUI().getPosition().getCenterY());
-                renderer.renderTiledTexture(panelToInfluence.getPosition().getX(), panelToInfluence.getPosition().getY(), panelToInfluence.getPosition().getWidth(),  panelToInfluence.getPosition().getHeight(), panelBackground.getTextureWidth(),  panelBackground.getTextureHeight(),(frames/limit)*0.9F,Color.BLACK);
-
-            }
-            else {
-                renderer.renderTiledTexture(panelToInfluence.getPosition().getX(), panelToInfluence.getPosition().getY(), panelToInfluence.getPosition().getWidth(),  panelToInfluence.getPosition().getHeight(), panelBackground.getTextureWidth(),  panelBackground.getTextureHeight(),(frames/limit),panelBackground.getColor());
-
-            }
-            if(isDialog){
-                renderBorders(panelToInfluence);
-            }
-            else{
-                rendererBorder.render(alphaMult);
-            }
-
-
-        }
+    public boolean isDone() {
+        return false;
     }
 
     @Override
-    public void render(float alphaMult) {
-
+    public boolean runWhilePaused() {
+        return true;
     }
 
     @Override
     public void advance(float amount) {
-
-        if(frames<=limit){
-            frames++;
-            float progress = frames/limit;
-            if(frames<limit&&!reachedMaxHeight){
-                panelToInfluence.getPosition().setSize(originalSizeX,originalSizeY*progress);
-                return;
+        if(CoreUITabId.REFIT.equals(Global.getSector().getCampaignUI().getCurrentCoreTab())||CoreUITabId.FLEET.equals(Global.getSector().getCampaignUI().getCurrentCoreTab())) {
+            if(button!=null&&button.isChecked()){
+                button.setChecked(false);
+                PersonAPI person = (PersonAPI) ReflectionUtilis.invokeMethod("getPerson",officerRowData);
+                Misc.setUnremovable(person,true);
+                person.getStats().setLevel(person.getStats().getLevel()+1);
+                ReflectionUtilis.invokeMethod("recreate",officerRowData);
+                officerRowData = null;
+                button = null;
+                ReflectionUtilis.invokeMethodWithAutoProjection("dismiss",currDialog,1);
+                Global.getSoundPlayer().playUISound("ui_char_spent_story_point_technology",1f,1f);
+                currDialog = null;
             }
-            if(frames>=limit&&!reachedMaxHeight){
-                reachedMaxHeight = true;
-                panelToInfluence.getPosition().setSize(originalSizeX,originalSizeY);
-                createUI(panelToInfluence);
-                return;
-
-            }
-
-
-        }
-        if(confirmButton!=null){
-            if(confirmButton.isChecked()){
-                confirmButton.setChecked(false);
-                applyConfirmScript();
-                ProductionUtil.getCoreUI().removeComponent(panelToInfluence);
-                onExit();
-            }
-        }
-        if(cancelButton!=null){
-            if(cancelButton.isChecked()){
-                cancelButton.setChecked(false);
-                ProductionUtil.getCoreUI().removeComponent(panelToInfluence);
-                onExit();
-            }
-
-        }
-    }
-    public void applyConfirmScript(){
-
-    }
-    @Override
-    public void processInput(List<InputEventAPI> events) {
-        for (InputEventAPI event : events) {
-            if(frames>=limit-1&&reachedMaxHeight){
-                if(event.isMouseDownEvent()&&!isDialog){
-                    TrapezoidButtonDetector detector = new TrapezoidButtonDetector();
-                    float xLeft = panelToInfluence.getPosition().getX();
-                    float xRight = panelToInfluence.getPosition().getX()+panelToInfluence.getPosition().getWidth();
-                    float yBot = panelToInfluence.getPosition().getY();
-                    float yTop = panelToInfluence.getPosition().getY()+panelToInfluence.getPosition().getHeight();
-                    boolean hovers = detector.determineIfHoversOverButton(xLeft,yTop,xRight,yTop,xLeft,yBot,xRight,yBot,Global.getSettings().getMouseX(),Global.getSettings().getMouseY());
-                    if(!hovers){
-                        ProductionUtil.getCoreUI().removeComponent(panelToInfluence);
-                        event.consume();
-                        onExit();
+            Object skillDialog = getSkillDialog();
+            if(skillDialog!=null){
+                if(officerRowData==null){
+                    Object listOfficers =ReflectionUtilis.invokeMethod("getListOfficers", skillDialog);
+                    ArrayList<Object>listItems = (ArrayList<Object>) ReflectionUtilis.invokeMethod("getItems",listOfficers);
+                    for (Object listItem : listItems) {
+                        for (Object assignableFieldValue : ReflectionUtilis.getAssignableFieldValues(listItem,ButtonAPI.class)) {
+                            if(assignableFieldValue instanceof ButtonAPI){
+                                ButtonAPI button = (ButtonAPI) assignableFieldValue;
+                                if(AshMisc.isStringValid(button.getText())){
+                                    if(button.getText().contains("integrate")){
+                                        if(button.isChecked()){
+                                            officerRowData = listItem;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-                if(!event.isConsumed()){
-                    if(event.getEventValue()== Keyboard.KEY_ESCAPE){
-                        ProductionUtil.getCoreUI().removeComponent(panelToInfluence);
-                        event.consume();
-                        onExit();
-                        break;
-                    }
+
+                List<UIComponentAPI> comps = ReflectionUtilis.getChildrenCopy(ProductionUtil.getCoreUI());
+                if(comps.size()==19&&button==null){
+                    UIComponentAPI comp = comps.get(18);
+                    UIPanelAPI compPanel = (UIPanelAPI) ReflectionUtilis.invokeMethod("getInnerPanel",comp);
+                        boolean found = officerRowData!=null;
+                        if(found){
+                            for (UIComponentAPI componentAPI : ReflectionUtilis.getChildrenCopy(compPanel)) {
+                                if(componentAPI instanceof ButtonAPI){
+                                    if(((ButtonAPI) componentAPI).getText().toLowerCase().contains("confirm")){
+                                        CustomPanelAPI panel = Global.getSettings().createCustom(componentAPI.getPosition().getWidth(),componentAPI.getPosition().getHeight(),null);
+                                        TooltipMakerAPI tooltip = panel.createUIElement(panel.getPosition().getWidth(),panel.getPosition().getHeight(),false);
+                                        tooltip.setButtonFontOrbitron20();
+                                        button =tooltip.addButton("Confirm",null,Misc.getStoryOptionColor(),Misc.getStoryDarkColor(),Alignment.MID,CutStyle.TL_BR,panel.getPosition().getWidth(),panel.getPosition().getHeight(),0f);
+                                        button.setShortcut(Keyboard.KEY_G,true);
+                                        button.setEnabled(((ButtonAPI) componentAPI).isEnabled()
+                                        );
+                                        panel.addUIElement(tooltip).inTL(0,0);
+                                        compPanel.addComponent(panel).inTL(componentAPI.getPosition().getX()-compPanel.getPosition().getX(),compPanel.getPosition().getY()-componentAPI.getPosition().getY()+compPanel.getPosition().getHeight()-componentAPI.getPosition().getHeight());
+                                        compPanel.removeComponent(componentAPI);
+                                        currDialog = comp;
+                                        break;
+                                    }
+
+                                }
+                            }
+                        }
+
+
+
+                }
+                else if(comps.size()!=19) {
+                    button =  null;
+                    currDialog = null;
+                    officerRowData = null;
+                }
+
+            }
+            else {
+                button =  null;
+                currDialog = null;
+                officerRowData = null;
+            }
+        }
+        else {
+            button =  null;
+            currDialog = null;
+            officerRowData = null;
+        }
+    }
+    public Object  getSkillDialog(){
+        try {
+            for (UIComponentAPI child : getChildren(ProductionUtil.getCoreUI())) {
+                if(child instanceof CaptainPickerDialog){
+                    return child;
                 }
             }
-            event.consume();
+        }
+        catch (Exception e ){
+            return null;
         }
 
-    }
-    public void forceDismiss(){
-        ProductionUtil.getCoreUI().removeComponent(panelToInfluence);
-        onExit();
-    }
-    public void onExit(){
-
-    }
-    @Override
-    public void buttonPressed(Object buttonId) {
-
-    }
-    public void renderBorders(CustomPanelAPI panelAPI) {
-        float leftX = panelAPI.getPosition().getX()+16;
-        float currAlpha = frames/limit;
-        if(currAlpha>=1)currAlpha =1;
-        top.setSize(16,16);
-        bot.setSize(16,16);
-        topLeft.setSize(16,16);
-        topRight.setSize(16,16);
-        bottomLeft.setSize(16,16);
-        bottomRight.setSize(16,16);
-        left.setSize(16,16);
-        right.setSize(16,16);
-
-        top.setAlphaMult(currAlpha);
-        bot.setAlphaMult(currAlpha);
-        topLeft.setAlphaMult(currAlpha);
-        topRight.setAlphaMult(currAlpha);
-        bottomLeft.setAlphaMult(currAlpha);
-        bottomRight.setAlphaMult(currAlpha);
-        left.setAlphaMult(currAlpha);
-        right.setAlphaMult(currAlpha);
-
-        float rightX = panelAPI.getPosition().getX()+panelAPI.getPosition().getWidth()-16;
-        float botX = panelAPI.getPosition().getY()+16;
-        AshMisc.startStencilWithXPad(panelAPI,8);
-        for (float i = leftX; i <= panelAPI.getPosition().getX()+panelAPI.getPosition().getWidth() ; i+=top.getWidth()) {
-            top.renderAtCenter(i,panelAPI.getPosition().getY()+panelAPI.getPosition().getHeight());
-            bot.renderAtCenter(i,panelAPI.getPosition().getY());
-        }
-        AshMisc.endStencil();
-        AshMisc.startStencilWithYPad(panelAPI,8);
-        for (float i = botX; i <= panelAPI.getPosition().getY()+panelAPI.getPosition().getHeight();  i+=top.getWidth()) {
-            left.renderAtCenter(panelAPI.getPosition().getX(),i);
-            right.renderAtCenter(panelAPI.getPosition().getX()+panelAPI.getPosition().getWidth(),i);
-        }
-        AshMisc.endStencil();
-        topLeft.renderAtCenter(leftX-16,panelAPI.getPosition().getY()+panelAPI.getPosition().getHeight());
-        topRight.renderAtCenter( panelAPI.getPosition().getX()+panelAPI.getPosition().getWidth(),panelAPI.getPosition().getY()+panelAPI.getPosition().getHeight());
-        bottomLeft.renderAtCenter(leftX-16,panelAPI.getPosition().getY());
-        bottomRight.renderAtCenter( panelAPI.getPosition().getX()+panelAPI.getPosition().getWidth(),panelAPI.getPosition().getY());
-    }
-    public ButtonAPI generateConfirmButton(TooltipMakerAPI tooltip){
-        ButtonAPI button = tooltip.addButton("Confirm","confirm", Misc.getBasePlayerColor(),Misc.getDarkPlayerColor(),Alignment.MID,CutStyle.TL_BR,160,25,0f);
-        button.setShortcut(Keyboard.KEY_G,true);
-        confirmButton = button;
-        return button;
-    }
-    public ButtonAPI generateCancelButton(TooltipMakerAPI tooltip){
-        ButtonAPI button = tooltip.addButton("Cancel","cancel", Misc.getBasePlayerColor(),Misc.getDarkPlayerColor(),Alignment.MID,CutStyle.TL_BR,buttonConfirmWidth,25,0f);
-        button.setShortcut(Keyboard.KEY_ESCAPE,true);
-        cancelButton = button;
-        return button;
-    }
-    public void createConfirmAndCancelSection(CustomPanelAPI mainPanel){
-        float totalWidth = buttonConfirmWidth*2+10;
-        TooltipMakerAPI tooltip = mainPanel.createUIElement(totalWidth,25,false);
-        tooltip.setButtonFontOrbitron20();
-        generateConfirmButton(tooltip);
-        generateCancelButton(tooltip);
-        confirmButton.getPosition().inTL(0,0);
-        cancelButton.getPosition().inTL(buttonConfirmWidth+5,0);
-        float bottom = originalSizeY;
-        mainPanel.addUIElement(tooltip).inTL(mainPanel.getPosition().getWidth()-(totalWidth)-10,bottom-40);
+        return null;
     }
 }
