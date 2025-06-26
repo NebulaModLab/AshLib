@@ -379,7 +379,7 @@ public class AiCoreLevelUpHijacker implements EveryFrameScript {
                         if(found){
                             for (UIComponentAPI componentAPI : ReflectionUtilis.getChildrenCopy(compPanel)) {
                                 if(componentAPI instanceof ButtonAPI){
-                                    if(((ButtonAPI) componentAPI).getText().toLowerCase().contains("confirm")){
+                                    if(((ButtonAPI) componentAPI).getText() != null && ((ButtonAPI) componentAPI).getText().toLowerCase().contains("confirm")){
                                         CustomPanelAPI panel = Global.getSettings().createCustom(componentAPI.getPosition().getWidth(),componentAPI.getPosition().getHeight(),null);
                                         TooltipMakerAPI tooltip = panel.createUIElement(panel.getPosition().getWidth(),panel.getPosition().getHeight(),false);
                                         tooltip.setButtonFontOrbitron20();
